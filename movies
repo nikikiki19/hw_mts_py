@@ -1,0 +1,38 @@
+import scrapy
+import re
+
+
+class WikiMovieSpider(scrapy.Spider):
+    name = "movies"
+    allowed_domains = ["ru.wikipedia.org"]
+    start_urls = ["https://ru.wikipedia.org/wiki/Категория:Фильмы_по_алфавиту"]
+
+    def clean_data(self, values):
+        pattern = r'(\[|\()\w+.?(\]|\))|\xa0|\n|рус.|англ.|\[*?\]|/|\*|\(|\)|\[|\]|,'
+        filtered = [v.strip() for v in values if not re.search(pattern, v)]
+        return ", ".join(filtered).strip() if filtered else None
+
+    def parse(self, response):
+        movie_links = response.xpath('//div[@id="mw-pages"]//div[@class="mw-category-group"]//a/@href').getall()
+        for link in movie_links:
+            yield response.follow(link, callback=self.parse_movie_page)
+
+        next_link = response.xpath('//a[contains(text(), "Следующая страница")]/@href').get()
+        if next_link:
+            yield response.follow(next_link, callback=self.parse)
+
+    def parse_movie_page(self, response):
+        title = response.xpath('//*[@class="infobox-above"]//text()').get(default="").strip()
+        genre_list = response.xpath('//*[@data-wikidata-property-id="P136"]//text()').getall()
+        director_list = response.xpath('//*[@data-wikidata-property-id="P57"]//text()').getall()
+        country_list = response.xpath('//*[@data-wikidata-property-id="P495"]//text()').getall()
+        year_data = response.xpath('//*[@data-wikidata-property-id="P577"]//a[@title]//text() | '
+                                   '//*[@class="dtstart"]//text()').getall()
+
+        yield {
+            "Фильм": title,
+            "Жанры": self.clean_data(genre_list),
+            "Режиссёры": self.clean_data(director_list),
+            "Страны": self.clean_data(country_list),
+            "Год выхода": year_data[-1] if year_data else None
+        }
